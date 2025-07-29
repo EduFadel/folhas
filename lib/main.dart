@@ -11,24 +11,23 @@ class YOLODemo extends StatefulWidget {
 }
 
 class _YOLODemoState extends State<YOLODemo> {
-  YOLO? yolo;
-  File? selectedImage;
-  List<dynamic> results = [];
-  bool isLoading = false;
-
+  YOLO? yolo; //modelo
+  File? selectedImage; //imagem selecionada
+  List<dynamic> results = []; //resultados
+  bool isLoading = false; //se o modelo ainda ta carregando
+  List<dynamic> masks = [];
+  
   @override
   void initState() {
     super.initState();
-    loadYOLO();
+    loadYOLO(); //inicia o modelo no inicio do app
   }
 
   Future<void> loadYOLO() async {
+    //carregar o modelo
     setState(() => isLoading = true);
 
-    yolo = YOLO(
-      modelPath: 'best_float32',
-      task: YOLOTask.segment,
-    );
+    yolo = YOLO(modelPath: 'best_float32', task: YOLOTask.segment);
 
     await yolo!.loadModel();
     setState(() => isLoading = false);
@@ -47,9 +46,16 @@ class _YOLODemoState extends State<YOLODemo> {
       final imageBytes = await selectedImage!.readAsBytes();
       final detectionResults = await yolo!.predict(imageBytes);
 
+      final boxes = detectionResults['boxes'] as List<dynamic>;
+      var masks = detectionResults['masks'] as List<dynamic>?;
+
+      print('Detected ${boxes.length} objects');
+      print('Masks available: ${masks}');
+
       setState(() {
         results = detectionResults['boxes'] ?? [];
         isLoading = false;
+        masks = detectionResults['masks'] as List<dynamic>?;
       });
     }
   }
@@ -64,10 +70,7 @@ class _YOLODemoState extends State<YOLODemo> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               if (selectedImage != null)
-                Container(
-                  height: 300,
-                  child: Image.file(selectedImage!),
-                ),
+                Container(height: 300, child: Image.file(selectedImage!)),
 
               SizedBox(height: 20),
 
@@ -94,7 +97,7 @@ class _YOLODemoState extends State<YOLODemo> {
                     return ListTile(
                       title: Text(detection['class'] ?? 'Unknown'),
                       subtitle: Text(
-                        'Confidence: ${(detection['confidence'] * 100).toStringAsFixed(1)}%'
+                        'Confidence: ${(detection['confidence'] * 100).toStringAsFixed(1)}%',
                       ),
                     );
                   },
