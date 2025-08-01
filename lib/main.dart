@@ -4,7 +4,21 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
 
-void main() => runApp(YOLODemo());
+void main() {
+  runApp(
+    MaterialApp(
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.green,
+          brightness: Brightness.dark,
+        ),
+      ),
+      debugShowCheckedModeBanner: false,
+      home: YOLODemo(),
+    ),
+  );
+}
 
 class YOLODemo extends StatefulWidget {
   @override
@@ -16,15 +30,12 @@ class _YOLODemoState extends State<YOLODemo> {
   File? selectedImage;
   List<dynamic> results = [];
   bool isLoading = false;
-  
+
   double? _imageWidth;
   double? _imageHeight;
 
-  // MUDANÇA 1: Função para obter uma cor consistente para cada classe.
-  // Usamos o hashCode do nome da classe para escolher uma cor de uma lista pré-definida.
-  // Isso garante que "Manaca" sempre terá a mesma cor, por exemplo.
   Color _getColorForClass(String className) {
-    final colors = Colors.primaries; // Lista de cores do Material Design
+    final colors = Colors.primaries;
     final hash = className.hashCode;
     final index = hash % colors.length;
     return colors[index];
@@ -53,9 +64,9 @@ class _YOLODemoState extends State<YOLODemo> {
     });
   }
 
-  Future<void> pickAndDetect() async {
+  Future<void> _pickAndDetect(ImageSource source) async {
     final picker = ImagePicker();
-    final image = await picker.pickImage(source: ImageSource.gallery);
+    final image = await picker.pickImage(source: source);
 
     if (image != null) {
       final imageFile = File(image.path);
@@ -71,10 +82,15 @@ class _YOLODemoState extends State<YOLODemo> {
 
       final imageBytes = await imageFile.readAsBytes();
       final detectionResults = await yolo!.predict(imageBytes);
-      final boxes = detectionResults['boxes'] as List<dynamic>? ?? [];
+      
+      final allBoxes = detectionResults['boxes'] as List<dynamic>? ?? [];
+
+      final filteredBoxes = allBoxes.where((box) {
+        return box['confidence'] >= 0.7;
+      }).toList();
 
       setState(() {
-        results = boxes;
+        results = filteredBoxes;
         isLoading = false;
       });
     }
@@ -82,58 +98,35 @@ class _YOLODemoState extends State<YOLODemo> {
 
   Widget _buildImageWithBoxes() {
     if (selectedImage == null || _imageWidth == null || _imageHeight == null) {
-      return Container(height: 300);
+      return _buildInitialView();
+    }
+    
+    if (isLoading) {
+      return const Center(child: CircularProgressIndicator());
     }
 
-    return Container(
-      height: 300,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          double containerWidth = constraints.maxWidth;
-          double containerHeight = constraints.maxHeight;
+    return AspectRatio(
+      aspectRatio: _imageWidth! / _imageHeight!,
+      child: Stack(
+        children: [
+          Image.file(
+            selectedImage!,
+            fit: BoxFit.cover, 
+          ),
+          
+          LayoutBuilder(builder: (context, constraints) {
+            double renderedWidth = constraints.maxWidth;
+            double renderedHeight = constraints.maxHeight;
 
-          double imageRatio = _imageWidth! / _imageHeight!;
-          double containerRatio = containerWidth / containerHeight;
-
-          double renderedWidth;
-          double renderedHeight;
-          double offsetX = 0;
-          double offsetY = 0;
-
-          if (imageRatio > containerRatio) {
-            renderedWidth = containerWidth;
-            renderedHeight = containerWidth / imageRatio;
-            offsetY = (containerHeight - renderedHeight) / 2;
-          } else {
-            renderedHeight = containerHeight;
-            renderedWidth = containerHeight * imageRatio;
-            offsetX = (containerWidth - renderedWidth) / 2;
-          }
-
-          return Stack(
-            children: [
-              Positioned(
-                left: offsetX,
-                top: offsetY,
-                width: renderedWidth,
-                height: renderedHeight,
-                child: Image.file(selectedImage!),
-              ),
-
-              ...results.map((detection) {
+            return Stack(
+              children: results.map((detection) {
                 final String className = detection['class'] ?? 'Unknown';
-                // MUDANÇA 2: A cor da caixa agora vem da nossa função
                 final Color boxColor = _getColorForClass(className);
-
-                final double x1Norm = detection['x1_norm'];
-                final double y1Norm = detection['y1_norm'];
-                final double x2Norm = detection['x2_norm'];
-                final double y2Norm = detection['y2_norm'];
-
-                final double left = (x1Norm * renderedWidth) + offsetX;
-                final double top = (y1Norm * renderedHeight) + offsetY;
-                final double width = (x2Norm - x1Norm) * renderedWidth;
-                final double height = (y2Norm - y1Norm) * renderedHeight;
+                
+                final double left = detection['x1_norm'] * renderedWidth;
+                final double top = detection['y1_norm'] * renderedHeight;
+                final double width = (detection['x2_norm'] - detection['x1_norm']) * renderedWidth;
+                final double height = (detection['y2_norm'] - detection['y1_norm']) * renderedHeight;
 
                 return Positioned(
                   left: left,
@@ -142,71 +135,126 @@ class _YOLODemoState extends State<YOLODemo> {
                   height: height,
                   child: Container(
                     decoration: BoxDecoration(
-                      // Usa a cor específica da classe
                       border: Border.all(color: boxColor, width: 2),
                     ),
-                    // MUDANÇA 3: O texto dentro da caixa foi REMOVIDO
                   ),
                 );
               }).toList(),
-            ],
-          );
-        },
+            );
+          }),
+        ],
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        appBar: AppBar(title: Text('YOLO Quick Demo')),
-        body: Center(
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Detector de Folhas'),
+        centerTitle: true,
+        elevation: 4,
+      ),
+      // MUDANÇA 1: Envolvemos o corpo da tela com SingleChildScrollView
+      body: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _buildImageWithBoxes(),
-              SizedBox(height: 20),
-              if (isLoading)
-                CircularProgressIndicator()
-              else
-                ElevatedButton(
-                  onPressed: yolo != null ? pickAndDetect : null,
-                  child: Text('Pick Image & Detect'),
+              Container(
+                decoration: BoxDecoration(
+                  border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.5)),
+                  borderRadius: BorderRadius.circular(20),
                 ),
-              SizedBox(height: 20),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: results.length,
-                  itemBuilder: (context, index) {
-                    final detection = results[index];
-                    final String className = detection['class'] ?? 'Unknown';
-                    // Obtém a cor para usar na bolinha
-                    final Color legendColor = _getColorForClass(className);
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: _buildImageWithBoxes(), 
+                ),
+              ),
+              const SizedBox(height: 20),
+              
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: yolo != null ? () => _pickAndDetect(ImageSource.gallery) : null,
+                    icon: const Icon(Icons.photo_library),
+                    label: const Text('Galeria'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: yolo != null ? () => _pickAndDetect(ImageSource.camera) : null,
+                    icon: const Icon(Icons.camera_alt),
+                    label: const Text('Câmera'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              
+              if (results.isNotEmpty)
+                Text('Resultados da Detecção', style: Theme.of(context).textTheme.headlineSmall),
+              const SizedBox(height: 10),
 
-                    return ListTile(
-                      // MUDANÇA 4: Adiciona a bolinha colorida no início da linha
-                      leading: Container(
-                        width: 24,
-                        height: 24,
-                        decoration: BoxDecoration(
-                          color: legendColor,
-                          shape: BoxShape.circle,
+              if (selectedImage != null && !isLoading && results.isEmpty)
+                Text('Nenhuma folha detectada com mais de 70% de confiança.', style: Theme.of(context).textTheme.bodyMedium),
+
+              // MUDANÇA 2: Removemos o widget `Expanded`
+              ListView.builder(
+                // MUDANÇA 3: Adicionamos estas duas propriedades
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: results.length,
+                itemBuilder: (context, index) {
+                  final detection = results[index];
+                  final String className = detection['class'] ?? 'Unknown';
+                  final double confidence = detection['confidence'];
+                  final Color legendColor = _getColorForClass(className);
+
+                  return Card(
+                    margin: const EdgeInsets.symmetric(vertical: 6),
+                    child: ListTile(
+                      leading: Container(width: 24, height: 24, decoration: BoxDecoration(color: legendColor, shape: BoxShape.circle)),
+                      title: Text(className, style: Theme.of(context).textTheme.titleMedium),
+                      subtitle: Padding(
+                        padding: const EdgeInsets.only(top: 4.0),
+                        child: LinearProgressIndicator(
+                          value: confidence,
+                          backgroundColor: Colors.grey.withOpacity(0.3),
+                          valueColor: AlwaysStoppedAnimation<Color>(legendColor),
                         ),
                       ),
-                      title: Text(className),
-                      subtitle: Text(
-                        'Confidence: ${(detection['confidence'] * 100).toStringAsFixed(1)}%',
-                      ),
-                    );
-                  },
-                ),
+                      trailing: Text('${(confidence * 100).toStringAsFixed(1)}%', style: Theme.of(context).textTheme.bodyLarge),
+                    ),
+                  );
+                },
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildInitialView() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.image_search, size: 80, color: Theme.of(context).colorScheme.primary),
+        const SizedBox(height: 16),
+        const Padding(
+          padding: EdgeInsets.all(8.0),
+          child: Text(
+            'Selecione uma imagem da galeria ou use a câmera para começar.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 16),
+          ),
+        ),
+      ],
     );
   }
 }
